@@ -29,8 +29,7 @@ should_get_token() {
     fi
 }
 
-get() {
-    CREDS_PROFILE=${1:-default}
+check_token() {
     if should_get_token; then
         cat >&2 <<EOF
 No valid AWS token found.
@@ -40,6 +39,11 @@ Please run the following command to create a new session:
 EOF
     exit 1
     fi
+}
+
+get() {
+    CREDS_PROFILE=${1:-default}
+    check_token
     get_cached_session | jq '{Version: 1} + .Credentials'
 }
 
@@ -57,6 +61,26 @@ create() {
         --serial-number $AWS_MFA_SERIAL \
         --token-code $AWS_MFA_TOKEN > $(get_session_cache_file_name)
     echo "Successfully created AWS Session."
+}
+
+save() {
+    CREDS_PROFILE=${1:-default}
+    SESSION_PROFILE=${2:-"${CREDS_PROFILE}-session"}
+    get $CREDS_PROFILE |\
+    jq -r '
+        del(.Expiration,.Version)|
+        to_entries|
+        map({
+            key:.key | gsub("(?<a>[A-Z])(?<b>[a-z])"; "_" + (.a|ascii_downcase) + .b),
+            value
+        })|
+        map({
+            key: ("aws" + .key),
+            value
+        })|
+        map("\(.key)=\(.value)")[]' |\
+        tr '=' ' ' |\
+        xargs -n 2 aws configure --profile $SESSION_PROFILE set
 }
 
 $@
