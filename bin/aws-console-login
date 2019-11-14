@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+target_profile=${1:-$AWS_PROFILE}
+
+profile=$target_profile
+root_profile=$target_profile
+role=$(aws configure get role_arn --profile $profile)
+region=$(aws configure get region --profile $profile)
+
+while true; do
+    set +e
+    parent_profile=$(aws configure get source_profile --profile $profile)
+    set -e
+    if [[ -n $parent_profile ]]; then
+        profile=$parent_profile
+    else
+        root_profile=$profile
+        break
+    fi
+done
+
+user_name() {
+    aws sts get-caller-identity --profile $1 |\
+        jq -r '.Arn' |\
+        sed -n 's,.*:user/\(.*\),\1,p'
+}
+
+get_role_session() {
+    aws sts assume-role \
+        --profile $1 \
+        --role-arn $2 \
+        --role-session-name $3
+}
+
+format_session() {
+    jq '.Credentials | {
+        sessionId: .AccessKeyId,
+        sessionKey: .SecretAccessKey,
+        sessionToken: .SessionToken
+    }'
+}
+
+get_signin_token() {
+    url="https://signin.aws.amazon.com/federation"
+    curl -fsS --get $url \
+    --data-urlencode "Action=getSigninToken" \
+    --data-urlencode "Session=$(get_role_session $1 $2 $3 | format_session)" \
+    -H 'Accept: application/json' |\
+    jq -r '.SigninToken'
+}
+
+get_signin_url() {
+    base_url="https://signin.aws.amazon.com/federation"
+    action="Action=login"
+    issuer="Issuer=example-script"
+    destination="Destination=https://console.aws.amazon.com"
+    token="SigninToken=$(get_signin_token $1 $2 $3)"
+    echo "$base_url?$action&$issuer&$destination&$token"
+}
+
+echo $(get_signin_url $root_profile $role "$(user_name $root_profile)")

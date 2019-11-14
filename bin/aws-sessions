@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+AWS_SESSION_CACHE_DIR=$HOME/.cache/aws-sessions/
+mkdir -p $AWS_SESSION_CACHE_DIR
+
+get_session_cache_file_name() {
+    echo ${AWS_SESSION_CACHE_DIR}/${CREDS_PROFILE}-mfa-session
+}
+
+get_cached_session() {
+    cat $(get_session_cache_file_name $CREDS_PROFILE)
+}
+
+is_token_outdated() {
+    now=$(date -u +%FT%TZ)
+    expiration=$(get_cached_session | jq -r '.Credentials.Expiration')
+    if [ -z "$expiration" ]; then
+        return 0
+    fi
+    if [[ "$now" < "$expiration" ]]; then
+        return 1
+    fi
+}
+
+should_get_token() {
+    if [ -f $(get_session_cache_file_name) ]; then
+        return $(is_token_outdated)
+    fi
+}
+
+get() {
+    CREDS_PROFILE=${1:-default}
+    if should_get_token; then
+        cat >&2 <<EOF
+No valid AWS token found.
+Please run the following command to create a new session:
+
+    aws-sessions create $CREDS_PROFILE
+EOF
+    exit 1
+    fi
+    get_cached_session | jq '{Version: 1} + .Credentials'
+}
+
+create() {
+    CREDS_PROFILE=${1:-default}
+    if [ -z "$AWS_MFA_SERIAL" ]; then
+        AWS_MFA_SERIAL=$(aws sts get-caller-identity --profile $CREDS_PROFILE | jq -r '.Arn' | sed -r 's/:user/:mfa/')
+    fi
+
+    echo "Using MFA Device: $AWS_MFA_SERIAL"
+    read -p "Code: " AWS_MFA_TOKEN
+    echo
+    aws sts get-session-token \
+        --profile $CREDS_PROFILE \
+        --serial-number $AWS_MFA_SERIAL \
+        --token-code $AWS_MFA_TOKEN > $(get_session_cache_file_name)
+    echo "Successfully created AWS Session."
+}
+
+$@
