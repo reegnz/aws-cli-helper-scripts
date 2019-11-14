@@ -6,7 +6,7 @@ easier.
 
 ## aws-sessions
 
-Docs: [docs/aws-sessions.md](docs/aws-sessions.md.)
+Docs: [docs/aws-sessions.md](docs/aws-sessions.md)
 
 
 ## aws-profiles
