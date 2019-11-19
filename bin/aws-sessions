@@ -80,7 +80,7 @@ save() {
         })|
         map("\(.key)=\(.value)")[]' |\
         tr '=' ' ' |\
-        xargs -n 2 aws configure --profile $SESSION_PROFILE set
+        xargs -r -n 2 aws configure --profile $SESSION_PROFILE set
 }
 
 $@
